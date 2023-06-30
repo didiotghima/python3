@@ -5,3 +5,6 @@ config.py
 .venv
 __pycache_/
 users.db
+smpt.db
+
+

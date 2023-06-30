@@ -1,99 +1,124 @@
-# from aiogram import Bot, Dispatcher, types, executor
-# from aiogram.dispatcher.filters.state import State, StatesGroup
-# from aiogram.contrib.fsm_storage.memory import MemoryStorage
-# from aiogram.dispatcher.storage import FSMContext
-# from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
-# from config import token
-# import sqlite3, time, logging   
+import re
+import sqlite3
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from aiogram import Bot, types
+from aiogram.dispatcher import Dispatcher
+from aiogram.utils import executor
 
-# bot = Bot(token)
-# storage = MemoryStorage()
-# dp = Dispatcher(bot, storage=storage)
-# logging.basicConfig(level=logging.INFO)
+# Настройки бота
+BOT_TOKEN = '6158100296:AAGRBCx5m0b1DJRvTcTf71pxv2aNPqwmk8g'
+
+# Настройки SMTP-сервера для отправки почты
+SMTP_SERVER = 'smtp.gmail.com'
+SMTP_PORT = 587
+SMTP_USERNAME = 'nurlanuuulubeksultan@gmail.com'
+SMTP_PASSWORD = 'afhqrpaytpedcfzw'
+# Параметры подключения к базе данных SQLite
+DB_FILE = 'bot.db'
+
+# Создание соединения с базой данных
+conn = sqlite3.connect(DB_FILE)
+cursor = conn.cursor()
+
+# Создание таблицы для хранения данных о пользователях
+cursor.execute('''CREATE TABLE IF NOT EXISTS users
+                  (chat_id INTEGER PRIMARY KEY, email TEXT, format TEXT)''')
+conn.commit()
+
+# Инициализация бота
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
 
-# database = sqlite3.connect('users.db')
-# cursor = database.cursor()
-# cursor.execute("""CREATE TABLE IF NOT EXISTS users(
-#     user_id INT,
-#     chat_id INT,
-#     username VARCHAR(255),
-#     first_name VARCHAR(255),
-#     last_name VARCHAR(255),
-#     created VARCHAR(100)
-# );
-# """)
-# cursor.connection.commit()
+@dp.message_handler(commands=['start'])
+async def start_handler(message: types.Message):
+    await message.reply("Привет! Я бот для отправки видео с YouTube на почту. Пожалуйста, укажи свою почту.")
 
-# Keyboard_buttons = [
-#     KeyboardButton('/start'),
-#     KeyboardButton('/help'),
-#     KeyboardButton('/milling'),
-#     KeyboardButton('/test'),
-#     KeyboardButton('Привет'),
-#     KeyboardButton('привет')
-# ]
-# Keyboard_one = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add(*Keyboard_buttons)
 
-# @dp.message_handler(commands='start')
-# async def start(message:types.Message):
-#     cursor.execute(f"SELECT * FROM users WHERE user_id = {message.from_user.id};")
-#     result = cursor.fetchall()
-#     if result == []:
-#      cursor.execute(f"""INSERT INTO users VALUES ({message.from_user.id},
-#                    {message.chat.id}, '{message.from_user.username}',
-#                    '{message.from_user.first_name}', 
-#                    '{message.from_user.last_name}',
-#                    '{time.ctime()}');
-#                    """)
-#     cursor.connection.commit()
-#     await message.answer(f"Привет {message.from_user.full_name}!", reply_markup=Keyboard_one)
-#     await message.answer(f"""Geeks готов к услугам
-# команды которые существуют
-# /test,/help
-# {message.from_user.full_name}
-#                          """)
-    
-# @dp.message_handler(commands='help')
-# async def start(message:types.Message):
-#     await message.answer("Чем я могу вам помочь?")
-    
-# @dp.message_handler(text='Привет')
-# async def hello(message:types.Message):
-#     await message.answer("Приветствую")
-    
-# @dp.message_handler(text='привет')
-# async def hello(message:types.Message):
-#     await message.reply("Приветствую")
+@dp.message_handler(regexp=r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+async def email_handler(message: types.Message):
+    email = message.text
 
-# @dp.message_handler(commands='test')
-# async def testing(message:types.Message):
-#     await message.answer_dice()
+    # Проверка, есть ли пользователь уже в базе данных
+    cursor.execute('SELECT * FROM users WHERE chat_id=?', (message.chat.id,))
+    user = cursor.fetchone()
 
-# class MailingState(StatesGroup):
-#     text = State()
+    if user:
+        # Обновление данных пользователя
+        cursor.execute('UPDATE users SET email=? WHERE chat_id=?', (email, message.chat.id))
+    else:
+        # Добавление нового пользователя в базу данных
+        cursor.execute('INSERT INTO users VALUES (?, ?, ?)', (message.chat.id, email, None))
 
-# @dp.message_handler(commands='milling')
-# async def milling(message:types.Message):
-#     if message.from_user.id in [5771196980]:
-#        await message.reply("Введите текст для рассылки:")
-#        await MailingState.text.set()
-#     else:
-#         await message.answer("у тебя нету прав к этой функции")
-       
-# @dp.message_handler(state=MailingState.text)
-# async def send_mailing_text(message:types.Message, state:FSMContext):
-#     await message.answer("начинаю рассылку...")
-#     cursor.execute("SELECT chat_id FROM users;")
-#     chats_id = cursor.fetchall()
-#     for chat in chats_id:
-#        await bot.send_message(chat[0], message.text)
-#     await message.answer("Рассылка окончена!")
-#     await state.finish() 
-    
-# @dp.message_handler()
-# async def not_foun(message:types.Message):
-#      await message.answer("Я вас не понял введите /help")
-    
-# executor.start_polling(dp)
+    conn.commit()
 
+    await message.reply("Отлично! Теперь укажи формат, в котором хочешь получить видео (mp3 или mp4).")
+
+
+@dp.message_handler(regexp=r'^(mp3|mp4)$')
+async def format_handler(message: types.Message):
+    chosen_format = message.text
+
+    # Обновление формата для пользователя
+    cursor.execute('UPDATE users SET format=? WHERE chat_id=?', (chosen_format, message.chat.id))
+    conn.commit()
+
+    await message.reply("Хорошо! Теперь отправь мне ссылку на видео с YouTube.")
+
+
+@dp.message_handler(regexp=r'^(http(s)?:\/\/)?((w){3}.)?youtu(be|.be)?(\.com)?\/.+')
+async def youtube_link_handler(message: types.Message):
+    video_url = message.text
+
+    # Извлечение идентификатора видео из ссылки
+    video_id = re.search(r'(?:\?v=|\/embed\/|\.be\/)([^&\n?#]+)', video_url)
+    if video_id:
+        video_id = video_id.group(1)
+    else:
+        await message.reply("Не удалось извлечь идентификатор видео. Пожалуйста, убедитесь, что ссылка является корректной.")
+        return
+
+    # Получение данных пользователя
+    cursor.execute('SELECT * FROM users WHERE chat_id=?', (message.chat.id,))
+    user = cursor.fetchone()
+
+    if not user or not user[1] or not user[2]:
+        await message.reply("Пожалуйста, сначала укажите свою почту и формат.")
+        return
+
+    email = user[1]
+    chosen_format = user[2]
+
+    # Создание SMTP-соединения и отправка письма с видео
+    try:
+        smtp_server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        smtp_server.starttls()
+        smtp_server.login(SMTP_USERNAME, SMTP_PASSWORD)
+
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = email
+        msg['Subject'] = 'YouTube Video'
+
+        # Загрузка видео с YouTube
+        video_attachment = MIMEBase('application', chosen_format)
+        video_attachment.set_payload(video_url)
+        encoders.encode_base64(video_attachment)
+        video_attachment.add_header('Content-Disposition', f'attachment; filename="{video_id}.{chosen_format}"')
+        msg.attach(video_attachment)
+
+        smtp_server.send_message(msg)
+        smtp_server.quit()
+
+        await message.reply(f"Видео успешно отправлено на почту {email} в формате {chosen_format}.")
+    except smtplib.SMTPException as e:
+        await message.reply("Произошла ошибка при отправке письма. Пожалуйста, попробуйте еще раз позже.")
+        print(str(e))
+
+
+if __name__ == '__main__':
+    executor.start_polling(dp)
