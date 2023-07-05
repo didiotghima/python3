@@ -1,167 +1,110 @@
-from aiogram import Bot, Dispatcher, types, executor 
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.dispatcher.storage import FSMContext
-from email.message import EmailMessage
-from pytube import YouTube
-from dotenv import load_dotenv
-import smtplib, sqlite3, logging, os, time
+import re
+import sqlite3
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from aiogram import Bot, types
+from aiogram.dispatcher import Dispatcher
+from aiogram.utils import executor
 
-load_dotenv('.env')
+BOT_TOKEN = '6158100296:AAGRBCx5m0b1DJRvTcTf71pxv2aNPqwmk8g'
 
+SMTP_SERVER = 'smtp.gmail.com'
+SMTP_PORT = 587
+SMTP_USERNAME = 'nurlanuuulubeksultan@gmail.com'    
+SMTP_PASSWORD = 'afhqrpaytpedcfzw'
+DB_FILE = 'bot.db'
 
-bot = Bot(os.environ.get('token'))
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
-logging.basicConfig(level=logging.INFO)
+conn = sqlite3.connect(DB_FILE)
+cursor = conn.cursor()
 
-inline_buttons = [
-    InlineKeyboardButton('Скачать аудио', callback_data='audio'),
-    InlineKeyboardButton('Скачать видео', callback_data='video'),
-    InlineKeyboardButton('Информация о видео', callback_data='info'),
-    InlineKeyboardButton('Введите email', callback_data='email')
-]
-inline_keyboard = InlineKeyboardMarkup().add(*inline_buttons)
+cursor.execute('''CREATE TABLE IF NOT EXISTS users
+                  (chat_id INTEGER PRIMARY KEY, email TEXT, format TEXT)''')
+conn.commit()
 
-database = sqlite3.connect('email.db')
-cursor = database.cursor()
-cursor.execute("""CREATE TABLE IF NOT EXISTS users(
-    user_id INT,
-    chat_id INT,
-    username VARCHAR(255),
-    first_name VARCHAR(255),
-    last_name VARCHAR(255)
-);
-""")
-cursor.connection.commit()
-
-class FormatState(StatesGroup):
-    url = State()
-    format_url = State()
-
-class AudioState(StatesGroup):
-    url = State()
-
-class VideoState(StatesGroup):
-    url = State()
-    info = State()
-
-class EmailState(StatesGroup):
-    email = State()
-
-@dp.message_handler(commands='start')
-async def start(message:types.Message):
-    cursor.execute(f"SELECT * FROM users WHERE user_id = {message.from_user.id};")
-    result = cursor.fetchall()
-    if result == []:
-        cursor.execute(f"""INSERT INTO users (user_id, chat_id, username, first_name,
-                    last_name) VALUES ({message.chat.id}, 
-                    '{message.from_user.username}',
-                    '{message.from_user.first_name}', 
-                    '{message.from_user.last_name}',
-                    '{time.ctime()}');
-                    """)
-    cursor.connection.commit()
-    await message.answer(f"Привет {message.from_user.full_name}!\nЯ помогу тебе скачать видео или же аудио с ютуба. Просто отправь ссылку из ютуба, и отрпвлю на почту на кототорую вы отправили.)", reply_markup=inline_keyboard)
-
-@dp.callback_query_handler(lambda call: call)
-async def all_inline(call):
-    if call.data == 'audio':
-        await bot.send_message(call.message.chat.id, 'Отправьте ссылку на аудио')
-        await AudioState.url.set()
-    elif call.data == 'video':
-        await bot.send_message(call.message.chat.id, 'Отправьте ссылку на видео')
-        await VideoState.url.set()
-    elif call.data == 'email':
-        await bot.send_message(call.message.chat.id, 'Отправьте email на которую вы хотите отправить, видио или же аудио.')
-        await EmailState.to_email.set()
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
 
-class EmailState(StatesGroup):
-    to_email = State()
-    subject = State()
-    message = State()
-    audio = State()
-    video = State()
+@dp.message_handler(commands=['start'])
+async def start_handler(message: types.Message):
+    await message.reply("Привет! Я бот для отправки видео с YouTube на почту. Пожалуйста, укажи свою почту.")
 
-# @dp.message_handler(commands='send')
-# async def send_command(message:types.Message):
-#     await message.answer('Введите почту на которую нужно отправить сообщение', reply_markup=inline_keyboard)
-#     await EmailState.to_email.set()
 
-@dp.message_handler(state=EmailState.to_email)
-async def get_subject(message:types.Message, state:FSMContext):
-    await state.update_data(to_email=message.text)
-    await message.answer('Что вы хотите отрпавить на почту, видио или де аудио...')
-    await EmailState.subject.set()
+@dp.message_handler(regexp=r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+async def email_handler(message: types.Message):
+    email = message.text
 
-# @dp.message_handler(commands='dowloand')
-# async def yt_get(message:types.Message, state:FSMContext):
-#     await message.reply("Дайте ссылку на видио или же аудио...")
+    cursor.execute('SELECT * FROM users WHERE chat_id=?', (message.chat.id,))
+    user = cursor.fetchone()
 
-@dp.message_handler(state=AudioState.url)
-async def download_audio(message:types.Message, state:FSMContext):
-    yt = YouTube(message.text, use_oauth=True)
-    await message.answer("Скачиваем аудио, ожидайте...")
-    try:
-        yt.streams.filter(only_audio=True).first().download('audio', f'{yt.title}.mp3')
-        await message.answer("Скачалось, отправляю...")
-        with open(f'audio/{yt.title}.mp3', 'rb') as audio:
-            await bot.send_audio(message.chat.id, audio, reply_markup=inline_keyboard)
-        os.remove(f'audio/{yt.title}.mp3')
-    except:
-        yt.streams.filter(only_audio=True).first().download('audio', f'{yt.author}.mp3')
-        await message.answer("Скачалось, отправляю...")
-        with open(f'audio/{yt.author}.mp3', 'rb') as audio:
-            await bot.send_audio(message.chat.id, audio, reply_markup=inline_keyboard)
-        os.remove(f'audio/{yt.author}.mp3')
-    await state.finish()
+    if user:
+        cursor.execute('UPDATE users SET email=? WHERE chat_id=?', (email, message.chat.id))
+    else:
+        cursor.execute('INSERT INTO users VALUES (?, ?, ?)', (message.chat.id, email, None))
 
-@dp.message_handler(state=VideoState.url)
-async def download_video(message:types.Message, state:FSMContext):
-    yt = YouTube(message.text, use_oauth=True)
-    await message.answer("Скачиваем видео...")
-    try:
-        yt.streams.filter(file_extension='mp4').first().download('video', f'{yt.title}.mp4')
-        await message.answer("Скачалось, отправляю...")
-        with open(f'video/{yt.title}.mp4', 'rb') as video:
-            await bot.send_video(message.chat.id, video, reply_markup=inline_keyboard)
-        os.remove(f'video/{yt.title}.mp4')
-    except:
-        yt.streams.filter(file_extension='mp4').first().download('video', f'{yt.author}.mp4')
-        await message.answer("Скачалось, отправляю...")
-        with open(f'video/{yt.author}.mp4', 'rb') as video:
-            await bot.send_video(message.chat.id, video, reply_markup=inline_keyboard)
-        os.remove(f'video/{yt.author}.mp4')
-    await state.finish()
-    await state.update_data(to_email=message.text)
-    await EmailState.subject.set()
+    conn.commit()
 
-@dp.message_handler(state=EmailState.message)
-async def send_message(message:types.Message, state:FSMContext):
-    await state.update_data(message=message.text)
-    await message.answer('Отправляем почту...')
-    res = await storage.get_data(user=message.from_user.id)
-    sender = os.environ.get('smtp_email')
-    password = os.environ.get('smtp_email_password')
+    await message.reply("Отлично! Теперь укажи формат, в котором хочешь получить видео (mp3 или mp4).")
 
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.starttls()
 
-    msg = EmailMessage()
-    msg.set_content(res['message'])
+@dp.message_handler(regexp=r'^(mp3|mp4)$')
+async def format_handler(message: types.Message):
+    chosen_format = message.text
 
-    msg['Subject'] = res['subject']
-    msg['From'] = os.environ.get('smtp_email')
-    msg['To'] = res['to_email']
+    cursor.execute('UPDATE users SET format=? WHERE chat_id=?', (chosen_format, message.chat.id))
+    conn.commit()
+
+    await message.reply("Хорошо! Теперь отправь мне ссылку на видео с YouTube.")
+
+
+@dp.message_handler(regexp=r'^(http(s)?:\/\/)?((w){3}.)?youtu(be|.be)?(\.com)?\/.+')
+async def youtube_link_handler(message: types.Message):
+    video_url = message.text
+
+    video_id = re.search(r'(?:\?v=|\/embed\/|\.be\/)([^&\n?#]+)', video_url)
+    if video_id:
+        video_id = video_id.group(1)
+    else:
+        await message.reply("Не удалось извлечь идентификатор видео. Пожалуйста, убедитесь, что ссылка является корректной.")
+        return
+
+    cursor.execute('SELECT * FROM users WHERE chat_id=?', (message.chat.id,))
+    user = cursor.fetchone()
+
+    if not user or not user[1] or not user[2]:
+        await message.reply("Пожалуйста, сначала укажите свою почту и формат.")
+        return
+
+    email = user[1]
+    chosen_format = user[2]
 
     try:
-        server.login(sender, password)
-        server.send_message(msg)
-        await message.answer('Успешно отправлено!')
-    except Exception as error:
-        await message.answer(f'Произошла ошибка попробуйте позже\n{error}')
-        await state.finish()
+        smtp_server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        smtp_server.starttls()
+        smtp_server.login(SMTP_USERNAME, SMTP_PASSWORD)
 
-executor.start_polling(dp)
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = email
+        msg['Subject'] = 'YouTube Video'
+
+        video_attachment = MIMEBase('application', chosen_format)
+        video_attachment.set_payload(video_url)
+        encoders.encode_base64(video_attachment)
+        video_attachment.add_header('Content-Disposition', f'attachment; filename="{video_id}.{chosen_format}"')
+        msg.attach(video_attachment)
+
+        smtp_server.send_message(msg)
+        smtp_server.quit()
+
+        await message.reply(f"Видео успешно отправлено на почту {email} в формате {chosen_format}.")
+    except smtplib.SMTPException as e:
+        await message.reply("Произошла ошибка при отправке письма. Пожалуйста, попробуйте еще раз позже.")
+        print(str(e))
+
+
+if __name__ == '__main__':
+    executor.start_polling(dp)

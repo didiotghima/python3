@@ -33,7 +33,7 @@ inline_buttons = [
     InlineKeyboardButton('Скачать аудио', callback_data='audio'),
     InlineKeyboardButton('Скачать видео', callback_data='video'),
     InlineKeyboardButton('Информация о видео', callback_data='info'),
-    InlineKeyboardButton('Наш сайт', url='https://geeks.edu.kg/'),
+    InlineKeyboardButton('Наш сайт', url='https://geeks.edu.kg/')
     # InlineKeyboardButton('Оплатить', pay=True)
     # InlineKeyboardButton('Окошко', web_app='https://geeks.edu.kg/')
 ]

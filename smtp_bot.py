@@ -55,11 +55,7 @@ async def start(message:types.Message):
 @dp.callback_query_handler(lambda call:call)
 async def all_inline(call):
     if call.data == 'send_button':
-        await send_command(call.message)
-
-
-
-        
+        await send_command(call.message) 
 
 #to_email, subject, message
 class EmailState(StatesGroup):
